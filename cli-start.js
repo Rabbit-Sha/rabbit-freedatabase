@@ -112,9 +112,9 @@ app.get("/drive/get/:fileId", async (req, res) => {
 
 
 // Start Server
-app.listen(8080, () => {
+app.listen(8080, "0.0.0.0", () => {
     console.log(`\n🚀 Starting ${dbInfo.name}...`);
-    console.log(`✅ Rabbit DB Server running locally at http://localhost:8080`);
+    console.log(`✅ Rabbit DB Server running at http://0.0.0.0:8080`);
 });
 
 // --- 📦 THE RABBIT COURIER (ENCRYPTED BACKGROUND SYNC) ---

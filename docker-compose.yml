@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  rabbit-db:
+    build: .
+    container_name: rabbit-database
+    ports:
+      - "8080:8080"
+      - "3000:3000"
+    volumes:
+      - ~/.rabbitdb_config.json:/root/.rabbitdb_config.json
+      - ./temp_uploads:/app/temp_uploads
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/db/get/test"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

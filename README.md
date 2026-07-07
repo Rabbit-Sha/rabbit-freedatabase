@@ -18,11 +18,33 @@ It acts as a local server on your PC or Termux. Your app talks to it instantly (
 
 ## 🛠️ Installation
 
+### Option 1: Docker (Recommended - Easiest)
+
+**Prerequisites:** You need [Docker](https://www.docker.com/products/docker-desktop) installed.
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/Shahil-Puttur/rabbit-database.git
+cd rabbit-database
+
+# 2. Run setup (interactive configuration)
+./setup.sh
+
+# 3. Start Rabbit DB
+docker-compose up
+```
+
+**That's it!** Your database is now running at `http://localhost:8080`
+
+👉 **[Full Docker Installation Guide →](INSTALLATION.md)**
+
+### Option 2: Node.js (Manual)
+
 **Prerequisites:** You need [Node.js](https://nodejs.org/) installed on your computer or Termux.
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/manus-ai/rabbit-database.git
+git clone https://github.com/Shahil-Puttur/rabbit-database.git
 
 # 2. Enter the folder
 cd rabbit-database
