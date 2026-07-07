@@ -107,6 +107,11 @@ fetch("http://localhost:8080/db/get/user_1")
   .then(res => res.json())
   .then(data => console.log(data));
 
+// Get ALL data (for dashboards)
+fetch("http://localhost:8080/db/all")
+  .then(res => res.json())
+  .then(data => console.log(data.data));
+
 // Advanced Querying
 fetch("http://localhost:8080/db/query", {
   method: "POST",

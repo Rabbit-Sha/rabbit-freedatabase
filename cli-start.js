@@ -110,6 +110,10 @@ app.get("/db/get/:key", (req, res) => {
     res.json({ success: true, data: localData[req.params.key] ? localData[req.params.key].value : null });
 });
 
+app.get("/db/all", (req, res) => {
+    res.json({ success: true, data: localData });
+});
+
 // Feature 4: Advanced Querying
 app.post("/db/query", (req, res) => {
     const { query } = req.body; // Basic filter: { field: 'age', operator: '>', value: 18 }

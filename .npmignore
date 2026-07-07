@@ -1,0 +1,7 @@
+docker-compose.yml
+Dockerfile
+temp_uploads/
+.git/
+.github/
+INSTALLATION.md
+setup.sh
