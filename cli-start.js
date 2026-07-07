@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const fs = require("fs");
+const fs = require("fs-extra");
 const path = require("path");
 const express = require("express");
 const cors = require("cors");
@@ -7,6 +7,10 @@ const axios = require("axios");
 const crypto = require("crypto");
 const multer = require("multer");
 const FormData = require("form-data");
+const http = require("http");
+const { Server } = require("socket.io");
+const ChunkManager = require("./lib/ChunkManager");
+const HydraManager = require("./lib/HydraManager");
 
 const dbId = process.argv[2];
 if (!dbId) {
@@ -15,6 +19,10 @@ if (!dbId) {
 }
 
 const configPath = path.join(require("os").homedir(), ".rabbitdb_config.json");
+if (!fs.existsSync(configPath)) {
+    console.log("❌ Config file not found! Run 'rab-create' first.");
+    process.exit();
+}
 const config = JSON.parse(fs.readFileSync(configPath));
 const dbInfo = config.databases.find(db => db.id == dbId);
 
@@ -43,78 +51,150 @@ function decryptText(encryptedText) {
 
 // Setup Local Cache
 const localDbPath = path.join(require("os").homedir(), `.rabbit_${dbInfo.name}.json`);
+const manifestPath = path.join(require("os").homedir(), `.rabbit_${dbInfo.name}_manifests.json`);
+
 let localData = {};
 if (fs.existsSync(localDbPath)) {
     localData = JSON.parse(fs.readFileSync(localDbPath));
 }
 
-// Setup Express & File Uploads
+let manifests = {};
+if (fs.existsSync(manifestPath)) {
+    manifests = JSON.parse(fs.readFileSync(manifestPath));
+}
+
+// Setup Express & Socket.io
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: "*" }
+});
+
 app.use(express.json());
 app.use(cors());
-const upload = multer({ dest: "temp_uploads/" }); // Temp folder for files
+app.use("/studio", express.static(path.join(__dirname, "studio")));
+const upload = multer({ dest: "temp_uploads/" });
+
+const bots = dbInfo.tokens || [{ botToken: dbInfo.botToken, channelId: dbInfo.channelId }];
+const hydra = new HydraManager(bots);
+const chunkManager = new ChunkManager(dbInfo.botToken, dbInfo.channelId);
 
 // --- 📊 TEXT DATABASE API ---
 
 app.post("/db/set", (req, res) => {
-    const { key, value } = req.body;
-    localData[key] = value;
+    const { key, value, updatedAt } = req.body;
+    const timestamp = updatedAt || Date.now();
+    
+    // Feature 8: Offline Auto-Merge (Timestamp Merging)
+    if (localData[key] && localData[key].updatedAt > timestamp) {
+        return res.json({ 
+            success: false, 
+            message: "Conflict: Newer data already exists locally.", 
+            currentValue: localData[key].value 
+        });
+    }
+
+    localData[key] = {
+        value,
+        updatedAt: timestamp
+    };
     fs.writeFileSync(localDbPath, JSON.stringify(localData, null, 2));
-    res.json({ success: true, message: "Saved locally!" });
+    
+    // Feature 3: Live Real-Time Sync
+    io.emit('dataChange', { key, value, updatedAt: localData[key].updatedAt });
+    
+    res.json({ success: true, message: "Saved locally!", updatedAt: localData[key].updatedAt });
 });
 
 app.get("/db/get/:key", (req, res) => {
-    res.json({ success: true, data: localData[req.params.key] || null });
+    res.json({ success: true, data: localData[req.params.key] ? localData[req.params.key].value : null });
 });
 
+// Feature 4: Advanced Querying
+app.post("/db/query", (req, res) => {
+    const { query } = req.body; // Basic filter: { field: 'age', operator: '>', value: 18 }
+    if (!query) return res.status(400).json({ error: "Query required" });
+
+    const results = Object.entries(localData)
+        .filter(([key, item]) => {
+            const val = item.value[query.field];
+            switch (query.operator) {
+                case '>': return val > query.value;
+                case '<': return val < query.value;
+                case '==': return val == query.value;
+                case 'contains': return typeof val === 'string' && val.includes(query.value);
+                default: return false;
+            }
+        })
+        .map(([key, item]) => ({ key, value: item.value }));
+
+    res.json({ success: true, results });
+});
 
 // --- 📸 MEDIA DRIVE API (Images/Videos) ---
 
-// 1. Upload a file to Telegram and get a File ID
+// Feature 1: Video Limit Breaker (Chunking)
 app.post("/drive/upload", upload.single("file"), async (req, res) => {
     try {
         const file = req.file;
-        const form = new FormData();
-        form.append("document", fs.createReadStream(file.path));
-        form.append("chat_id", dbInfo.channelId);
+        const stats = await fs.stat(file.path);
+        
+        let result;
+        if (stats.size > 20 * 1024 * 1024) { // If > 20MB, use chunking
+            console.log("📦 Large file detected, starting chunked upload...");
+            result = await chunkManager.uploadLargeFile(file.path);
+            manifests[result.fileId] = result;
+            fs.writeFileSync(manifestPath, JSON.stringify(manifests, null, 2));
+            res.json({ 
+                success: true, 
+                file_id: result.fileId, 
+                isChunked: true,
+                url: `http://localhost:8080/drive/get/${result.fileId}` 
+            });
+        } else {
+            const form = new FormData();
+            form.append("document", fs.createReadStream(file.path));
+            form.append("chat_id", dbInfo.channelId);
 
-        const response = await axios.post(`https://api.telegram.org/bot${dbInfo.botToken}/sendDocument`, form, {
-            headers: form.getHeaders()
-        });
+            const response = await hydra.post("sendDocument", form, {
+                headers: form.getHeaders()
+            });
+            const fileId = response.data.result.document.file_id;
+            res.json({ success: true, file_id: fileId, isChunked: false, url: `http://localhost:8080/drive/get/${fileId}` });
+        }
 
-        // Delete local temp file after upload to save space
         fs.unlinkSync(file.path); 
-
-        const fileId = response.data.result.document.file_id;
-        res.json({ success: true, file_id: fileId, url: `http://localhost:8080/drive/get/${fileId}` });
-
     } catch (error) {
+        console.error(error);
         res.status(500).json({ success: false, error: "Upload failed" });
     }
 });
 
-// 2. Stream a file from Telegram
 app.get("/drive/get/:fileId", async (req, res) => {
     try {
-        // Step A: Get File Path from Telegram
-        const tgRes = await axios.get(`https://api.telegram.org/bot${dbInfo.botToken}/getFile?file_id=${req.params.fileId}`);
-        const filePath = tgRes.data.result.file_path;
-
-        // Step B: Stream the file directly to the user's browser/app!
-        const fileUrl = `https://api.telegram.org/file/bot${dbInfo.botToken}/${filePath}`;
-        const fileStream = await axios({ method: "get", url: fileUrl, responseType: "stream" });
+        const fileId = req.params.fileId;
         
-        fileStream.data.pipe(res);
+        if (fileId.startsWith('vid_') && manifests[fileId]) {
+            console.log("🎬 Streaming chunked file...");
+            await chunkManager.streamFile(manifests[fileId], res);
+        } else {
+            const tgRes = await hydra.get("getFile", { file_id: req.params.fileId });
+            const filePath = tgRes.data.result.file_path;
+            const fileUrl = `https://api.telegram.org/file/bot${dbInfo.botToken}/${filePath}`;
+            const fileStream = await axios({ method: "get", url: fileUrl, responseType: "stream" });
+            fileStream.data.pipe(res);
+        }
     } catch (error) {
         res.status(404).send("File not found");
     }
 });
 
-
 // Start Server
-app.listen(8080, "0.0.0.0", () => {
+const PORT = 8080;
+server.listen(PORT, "0.0.0.0", () => {
     console.log(`\n🚀 Starting ${dbInfo.name}...`);
-    console.log(`✅ Rabbit DB Server running at http://0.0.0.0:8080`);
+    console.log(`✅ Rabbit DB Server running at http://0.0.0.0:${PORT}`);
+    console.log(`📡 Real-time Sync enabled via WebSockets`);
 });
 
 // --- 📦 THE RABBIT COURIER (ENCRYPTED BACKGROUND SYNC) ---
@@ -123,26 +203,19 @@ let lastSyncedData = "";
 setInterval(async () => {
     try {
         if (!fs.existsSync(localDbPath)) return;
-        
         const fileContent = fs.readFileSync(localDbPath, "utf8");
-        
-        // Only sync if data has changed to save bandwidth
         if (fileContent === lastSyncedData) return; 
 
-        // 🔒 Encrypt the entire database before sending to Telegram
         const encryptedData = encryptText(fileContent);
-        
         const form = new FormData();
         form.append("document", Buffer.from(encryptedData, "utf-8"), { filename: "encrypted_backup.rabbit" });
         form.append("chat_id", dbInfo.channelId);
 
-        await axios.post(`https://api.telegram.org/bot${dbInfo.botToken}/sendDocument`, form, {
+        await hydra.post("sendDocument", form, {
             headers: form.getHeaders()
         });
         
         lastSyncedData = fileContent;
         console.log("🔒 Background Sync: Database encrypted and backed up to Telegram.");
-    } catch (error) {
-        // Silent fail on network error
-    }
-}, 10000); // Checks every 10 seconds
+    } catch (error) { }
+}, 10000);

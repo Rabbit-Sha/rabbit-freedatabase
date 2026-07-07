@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rabbit Studio | Visual Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        .json-card { transition: all 0.3s ease; }
+        .json-card:hover { transform: translateY(-5px); border-color: #a855f7; }
+    </style>
+</head>
+<body class="bg-[#0f172a] text-slate-200 min-h-screen">
+    <!-- Navbar -->
+    <nav class="border-b border-slate-800 bg-[#1e293b] p-4 flex justify-between items-center sticky top-0 z-50">
+        <div class="flex items-center space-x-2">
+            <span class="text-3xl">🐇</span>
+            <h1 class="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">Rabbit Studio</h1>
+        </div>
+        <div class="flex items-center space-x-4">
+            <span id="status-dot" class="h-3 w-3 rounded-full bg-red-500 animate-pulse"></span>
+            <span id="status-text" class="text-sm font-medium">Disconnected</span>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-6">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- Sidebar / Stats -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-[#1e293b] rounded-xl p-6 border border-slate-800">
+                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-4">Database Stats</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <p class="text-2xl font-bold" id="total-keys">0</p>
+                            <p class="text-xs text-slate-500">Total Keys Stored</p>
+                        </div>
+                        <div>
+                            <p class="text-2xl font-bold" id="last-sync">Never</p>
+                            <p class="text-xs text-slate-500">Last Telegram Sync</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-[#1e293b] rounded-xl p-6 border border-slate-800">
+                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-4">Quick Actions</h2>
+                    <button onclick="refreshData()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold transition mb-2">Refresh Local Cache</button>
+                    <button class="w-full py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-bold transition">Manual Backup</button>
+                </div>
+            </div>
+
+            <!-- Main Content / Data Explorer -->
+            <div class="lg:col-span-3 space-y-6">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-2xl font-bold">Data Explorer</h2>
+                    <div class="relative">
+                        <input type="text" placeholder="Search keys..." class="bg-[#1e293b] border border-slate-800 rounded-lg py-2 px-4 pl-10 focus:outline-none focus:border-purple-500 w-64">
+                        <svg class="w-5 h-5 absolute left-3 top-2.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </div>
+                </div>
+
+                <div id="data-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Cards will be injected here -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const socket = io("http://localhost:8080");
+        let currentData = {};
+
+        socket.on('connect', () => {
+            document.getElementById('status-dot').className = "h-3 w-3 rounded-full bg-green-500";
+            document.getElementById('status-text').innerText = "Connected to Rabbit DB";
+            refreshData();
+        });
+
+        socket.on('dataChange', (change) => {
+            console.log("Real-time update:", change);
+            refreshData();
+        });
+
+        async function refreshData() {
+            try {
+                // In a real scenario, we'd have a /db/all endpoint
+                // For now, let's assume we can fetch all or just wait for updates
+                // For this demo, we'll fetch a sample or show the live updates
+            } catch (e) {
+                console.error("Failed to fetch data", e);
+            }
+        }
+
+        function renderData(data) {
+            const grid = document.getElementById('data-grid');
+            grid.innerHTML = '';
+            
+            Object.entries(data).forEach(([key, item]) => {
+                const card = document.createElement('div');
+                card.className = "json-card bg-[#1e293b] p-6 rounded-xl border border-slate-800";
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <span class="px-2 py-1 bg-purple-500/10 text-purple-400 text-xs font-bold rounded">${key}</span>
+                        <span class="text-[10px] text-slate-500">${new Date(item.updatedAt).toLocaleTimeString()}</span>
+                    </div>
+                    <pre class="text-xs text-green-400 overflow-x-auto">${JSON.stringify(item.value, null, 2)}</pre>
+                `;
+                grid.appendChild(card);
+            });
+            
+            document.getElementById('total-keys').innerText = Object.keys(data).length;
+        }
+
+        // Mocking data for visual demo if needed
+        // renderData({"user_1": { value: {name: "John"}, updatedAt: Date.now() }});
+    </script>
+</body>
+</html>
